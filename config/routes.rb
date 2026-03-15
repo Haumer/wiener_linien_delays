@@ -1,6 +1,18 @@
 Rails.application.routes.draw do
   devise_for :users
   root to: "pages#home"
+  get "delays", to: "pages#delays"
+
+  namespace :api do
+    get :vehicles, to: "vehicles#index"
+    get :stops, to: "stops#index"
+    get "stops/departures", to: "stops#departures", as: :stops_departures
+    get :lines, to: "lines#index"
+    get :line_health, to: "line_health#index"
+    get "line_health/history", to: "line_health#history"
+    get :disruptions, to: "disruptions#index"
+  end
+
   # Define your application routes per the DSL in https://guides.rubyonrails.org/routing.html
 
   # Reveal health status on /up that returns 200 if the app boots with no exceptions, otherwise 500.

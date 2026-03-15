@@ -1,0 +1,4 @@
+trip_id,arrival_time,departure_time,stop_id,stop_sequence
+wl_trip_tram_2,08:00:00,08:00:00,wl_stop_vienna,1
+wl_trip_bus_13a,08:01:00,08:01:00,wl_stop_vienna,1
+wl_trip_u1,08:02:00,08:02:00,wl_stop_vienna,1

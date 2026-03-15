@@ -1,0 +1,9 @@
+shape_id,shape_pt_lat,shape_pt_lon,shape_pt_sequence
+oebb_shape_s80,48.1700,16.3300,1
+oebb_shape_s80,48.1820,16.3520,2
+oebb_shape_s80,48.1940,16.3740,3
+oebb_shape_rjx,48.1820,16.3500,1
+oebb_shape_rjx,48.1860,16.3750,2
+oebb_shape_rjx,48.1900,16.4000,3
+oebb_shape_bus,48.1800,16.3300,1
+oebb_shape_bus,48.1840,16.3420,2

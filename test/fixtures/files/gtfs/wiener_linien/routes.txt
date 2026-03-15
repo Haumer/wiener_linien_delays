@@ -1,0 +1,4 @@
+route_id,route_short_name,route_long_name,route_type
+wl_tram_2,2,Tram 2,0
+wl_bus_13a,13A,Bus 13A,3
+wl_u1,U1,U-Bahn U1,1

@@ -1,18 +1,18 @@
 <!DOCTYPE html>
 <html>
   <head>
-    <title>WienerLinienLive</title>
+    <title><%= content_for(:title) || "Wien Live" %></title>
     <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
     <%= csrf_meta_tags %>
     <%= csp_meta_tag %>
 
     <%= stylesheet_link_tag "application", "data-turbo-track": "reload" %>
+    <%= yield :head %>
     <%= javascript_importmap_tags %>
   </head>
 
-  <body><%= render "shared/navbar" %>
-<%= render "shared/flashes" %>
-
+  <body class="<%= "#{controller_name}-#{action_name}" %>">
+    <%= render "shared/flashes" %>
     <%= yield %>
   </body>
 </html>

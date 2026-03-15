@@ -1,2 +1,209 @@
-<h1>Pages#home</h1>
-<p>Find me in app/views/pages/home.html.erb</p>
+<% content_for :title, "Wien Live" %>
+
+<% content_for :head do %>
+  <link rel="preconnect" href="https://unpkg.com">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="">
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+<% end %>
+
+<div
+  class="wien-live"
+  data-controller="live-map"
+  data-live-map-lines-url-value="<%= api_lines_path %>"
+  data-live-map-vehicles-url-value="<%= api_vehicles_path %>"
+  data-live-map-stops-url-value="<%= api_stops_path %>"
+  data-live-map-stop-departures-url-value="<%= api_stops_departures_path %>"
+  data-live-map-poll-interval-value="10000"
+>
+  <main class="wien-live__stage">
+    <div class="wien-live__map" data-live-map-target="map"></div>
+
+    <header class="wien-live__topbar">
+      <div class="wien-live__brand">
+        <p class="wien-live__eyebrow">Vienna public transit radar</p>
+        <h1>Wien Live</h1>
+      </div>
+
+      <div class="wien-live__overlay-tools">
+        <div class="wien-live__statusline">
+          <div class="status-badge" data-live-map-target="feedStatus" data-state="loading">
+            Connecting to live feed...
+          </div>
+          <p class="wien-live__timestamp" data-live-map-target="lastUpdated">
+            Waiting for the first live update...
+          </p>
+        </div>
+
+        <div class="wien-live__filters" aria-label="Vehicle filters">
+          <% [
+            ["tram", "Tram", "fa-solid fa-train-tram", "tramCount"],
+            ["bus", "Bus", "fa-solid fa-bus", "busCount"],
+            ["sbahn", "S-Bahn", "fa-solid fa-train-subway", "sbahnCount"],
+            ["obus", "O-Bus", "fa-solid fa-bolt", "obusCount"],
+            ["rail", "Train", "fa-solid fa-train", "railCount"]
+          ].each do |category, label, icon, target| %>
+            <label class="filter-chip filter-chip--<%= category %>" title="Toggle <%= label %>">
+              <input
+                type="checkbox"
+                value="<%= category %>"
+                checked
+                data-live-map-target="categoryToggle"
+                data-action="change->live-map#toggleCategory"
+              >
+              <span>
+                <i class="<%= icon %>" aria-hidden="true"></i>
+                <strong data-live-map-target="<%= target %>">0</strong>
+                <span class="sr-only"><%= label %></span>
+              </span>
+            </label>
+          <% end %>
+
+          <label class="filter-chip filter-chip--stops" title="Toggle stops">
+            <input
+              type="checkbox"
+              value="stops"
+              checked
+              data-live-map-target="stopsToggle"
+              data-action="change->live-map#toggleStops"
+            >
+            <span>
+              <i class="fa-solid fa-location-dot" aria-hidden="true"></i>
+              <span class="sr-only">Stops</span>
+            </span>
+          </label>
+
+          <label class="filter-chip filter-chip--lines" title="Toggle route lines">
+            <input
+              type="checkbox"
+              value="lines"
+              checked
+              data-live-map-target="linesToggle"
+              data-action="change->live-map#toggleLines"
+            >
+            <span>
+              <i class="fa-solid fa-route" aria-hidden="true"></i>
+              <span class="sr-only">Lines</span>
+            </span>
+          </label>
+        </div>
+
+        <div class="wien-live__actions">
+          <div class="wien-live__map-modes">
+            <button
+              type="button"
+              class="map-mode-button"
+              data-live-map-target="basemapButton"
+              data-basemap="street"
+              data-action="click->live-map#setBasemap"
+              title="Street map"
+              aria-label="Street map"
+            >
+              <i class="fa-regular fa-map" aria-hidden="true"></i>
+            </button>
+            <button
+              type="button"
+              class="map-mode-button"
+              data-live-map-target="basemapButton"
+              data-basemap="aerial"
+              data-action="click->live-map#setBasemap"
+              title="Aerial map"
+              aria-label="Aerial map"
+            >
+              <i class="fa-solid fa-camera" aria-hidden="true"></i>
+            </button>
+          </div>
+
+          <div class="wien-live__auth">
+            <% if user_signed_in? %>
+              <span class="wien-live__auth-label" title="<%= current_user.email %>">
+                <i class="fa-solid fa-circle-user" aria-hidden="true"></i>
+                <span class="sr-only"><%= current_user.email %></span>
+              </span>
+              <%= link_to destroy_user_session_path, data: { turbo_method: :delete }, class: "wien-live__auth-link", title: "Sign out", aria: { label: "Sign out" } do %>
+                <i class="fa-solid fa-right-from-bracket" aria-hidden="true"></i>
+                <span class="sr-only">Sign out</span>
+              <% end %>
+            <% else %>
+              <%= link_to new_user_session_path, class: "wien-live__auth-link", title: "Sign in", aria: { label: "Sign in" } do %>
+                <i class="fa-solid fa-right-to-bracket" aria-hidden="true"></i>
+                <span class="sr-only">Sign in</span>
+              <% end %>
+              <%= link_to new_user_registration_path, class: "wien-live__auth-link wien-live__auth-link--primary", title: "Create account", aria: { label: "Create account" } do %>
+                <i class="fa-solid fa-user-plus" aria-hidden="true"></i>
+                <span class="sr-only">Create account</span>
+              <% end %>
+            <% end %>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <aside
+      class="disruptions-panel"
+      data-live-map-target="disruptionsPanel"
+      data-open="false"
+    >
+      <header class="disruptions__header">
+        <h2 class="disruptions__title">
+          <i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i>
+          Line Disruptions
+        </h2>
+        <button
+          type="button"
+          class="disruptions__close"
+          data-action="click->live-map#toggleDisruptionsPanel"
+          aria-label="Close disruptions panel"
+        >
+          <i class="fa-solid fa-xmark" aria-hidden="true"></i>
+        </button>
+      </header>
+      <div class="disruptions__body" data-live-map-target="disruptionsList">
+        <p class="disruptions__empty">Collecting data...</p>
+      </div>
+    </aside>
+
+    <div class="wien-live__bottombar">
+      <div class="wien-live__live-strip">
+        <div class="live-chip live-chip--total">
+          <i class="fa-solid fa-wave-square" aria-hidden="true"></i>
+          <span><strong data-live-map-target="vehicleTotal">0</strong> live</span>
+        </div>
+
+        <button
+          type="button"
+          class="disruptions-toggle"
+          data-action="click->live-map#toggleDisruptionsPanel"
+          title="Line disruptions"
+        >
+          <i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i>
+          <strong data-live-map-target="disruptionsCount">0</strong>
+        </button>
+
+        <p class="wien-live__stop-count">
+          <i class="fa-solid fa-location-dot" aria-hidden="true"></i>
+          <strong data-live-map-target="stopCount">0</strong>
+          <span>stops</span>
+        </p>
+
+        <p class="wien-live__hint" data-live-map-target="stopHint">
+          Loading nearby stops...
+        </p>
+      </div>
+
+      <div class="tracking-card">
+        <p class="tracking-card__summary" data-live-map-target="trackingSummary">
+          Select a tram, bus, or train marker to lock the camera on it.
+        </p>
+        <button
+          type="button"
+          class="tracking-button"
+          data-live-map-target="trackingButton"
+          data-action="click->live-map#toggleTracking"
+          disabled
+        >
+          Track
+        </button>
+      </div>
+    </div>
+  </main>
+</div>
