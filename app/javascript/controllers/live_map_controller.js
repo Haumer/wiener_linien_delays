@@ -1180,7 +1180,7 @@ export default class extends Controller {
       level = "severe"
     } else if (stalled || delayMinutes >= 5) {
       level = "warning"
-    } else if (delayMinutes >= 2) {
+    } else if (delayMinutes >= 3) {
       level = "minor"
     }
 

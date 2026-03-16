@@ -8,6 +8,8 @@
 
     <%= stylesheet_link_tag "application", "data-turbo-track": "reload" %>
     <%= yield :head %>
+    <script src="/chart.umd.js"></script>
+    <script src="/chartjs-adapter-date-fns.bundle.min.js"></script>
     <%= javascript_importmap_tags %>
   </head>
 

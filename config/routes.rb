@@ -2,6 +2,9 @@ Rails.application.routes.draw do
   devise_for :users
   root to: "pages#home"
   get "delays", to: "pages#delays"
+  get "delays/:line", to: "pages#line_delays", as: :line_delays
+  # get "network", to: "pages#network"
+  # get "fleet", to: "pages#fleet"
 
   namespace :api do
     get :vehicles, to: "vehicles#index"

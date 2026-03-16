@@ -1,0 +1,211 @@
+<% content_for :title, "Fleet Tracker — Wien Live" %>
+
+<% content_for :head do %>
+  <link rel="preconnect" href="https://unpkg.com">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="">
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+<% end %>
+
+<div class="delays-page">
+  <header class="delays__header">
+    <div class="delays__brand">
+      <p class="delays__eyebrow">Vienna public transit</p>
+      <h1>Fleet Tracker</h1>
+      <p class="delays__subtitle">
+        <% if @latest_at %>
+          Where vehicles stop reporting — depots, terminals, and breakdowns. Last 24 hours.
+        <% else %>
+          Collecting data...
+        <% end %>
+      </p>
+    </div>
+    <nav class="delays__nav" style="display:flex;gap:0.5rem">
+      <%= link_to delays_path, class: "delays__back-link" do %>
+        <i class="fa-solid fa-chart-line" aria-hidden="true"></i> Delays
+      <% end %>
+      <%= link_to root_path, class: "delays__back-link" do %>
+        <i class="fa-solid fa-map" aria-hidden="true"></i> Live Map
+      <% end %>
+    </nav>
+  </header>
+
+  <% if @latest_at %>
+    <section class="delays__summary">
+      <div class="summary-card">
+        <span class="summary-card__value"><%= @active.size %></span>
+        <span class="summary-card__label">Active now</span>
+      </div>
+      <div class="summary-card">
+        <span class="summary-card__value"><%= @terminated.size %></span>
+        <span class="summary-card__label">Terminated (24h)</span>
+      </div>
+      <div class="summary-card">
+        <span class="summary-card__value"><%= @hotspots.size %></span>
+        <span class="summary-card__label">Termination zones</span>
+      </div>
+    </section>
+
+    <!-- Termination map -->
+    <section class="delays__chart-section">
+      <h2>Where Vehicles Stop Reporting</h2>
+      <p class="delays__chart-hint">
+        Red circles = termination hotspots (multiple vehicles ended here). Larger = more vehicles.
+        These reveal depots, terminal loops, and breakdown spots.
+      </p>
+      <div id="fleet-map" style="height:420px;border-radius:0.5rem;overflow:hidden;margin-top:0.5rem"></div>
+
+      <script>
+        document.addEventListener("DOMContentLoaded", function() {
+          if (!window.L) return;
+
+          var map = L.map("fleet-map").setView([48.21, 16.37], 12);
+          L.tileLayer("https://cartodb-basemaps-{s}.global.ssl.fastly.net/light_all/{z}/{x}/{y}{r}.png", {
+            attribution: '&copy; CARTO',
+            maxZoom: 18
+          }).addTo(map);
+
+          var hotspots = <%= raw @hotspots.map { |lat, lng, count, lines|
+            { lat: lat.to_f, lng: lng.to_f, count: count, lines: lines }
+          }.to_json %>;
+
+          hotspots.forEach(function(h) {
+            var radius = Math.min(Math.max(h.count * 3, 8), 40);
+            L.circleMarker([h.lat, h.lng], {
+              radius: radius,
+              color: "#ef4444",
+              fillColor: "#ef4444",
+              fillOpacity: 0.35,
+              weight: 2,
+              opacity: 0.8
+            }).addTo(map).bindPopup(
+              "<strong>" + h.count + " vehicles terminated here</strong><br>" +
+              "<span style='color:#64748b;font-size:12px'>Lines: " + h.lines.join(", ") + "</span>"
+            );
+          });
+
+          // Individual termination points
+          var terminated = <%= raw @terminated.map { |vp|
+            { lat: vp.lat.to_f, lng: vp.lng.to_f, line: vp.line, category: vp.category,
+              direction: vp.direction, last_seen: vp.try(:last_seen_at)&.strftime("%H:%M") }
+          }.to_json %>;
+
+          terminated.forEach(function(t) {
+            L.circleMarker([t.lat, t.lng], {
+              radius: 3,
+              color: "#94a3b8",
+              fillColor: "#94a3b8",
+              fillOpacity: 0.5,
+              weight: 1
+            }).addTo(map).bindPopup(
+              "<strong>" + t.line + "</strong> → " + (t.direction || "unknown") +
+              "<br><span style='color:#64748b;font-size:12px'>Last seen: " + (t.last_seen || "?") + "</span>"
+            );
+          });
+        });
+      </script>
+    </section>
+
+    <div class="delays__grid">
+      <!-- Terminations by hour -->
+      <section class="delays__chart-section">
+        <h2>When Do Vehicles Stop?</h2>
+        <p class="delays__chart-hint">Terminations by hour of day — spikes = end of service windows</p>
+        <%= column_chart @by_hour,
+          colors: ["#64748b"],
+          library: {
+            plugins: { legend: { display: false } },
+            scales: { y: { beginAtZero: true } }
+          },
+          height: "240px" %>
+      </section>
+
+      <!-- By category -->
+      <section class="delays__chart-section">
+        <h2>Terminations by Type</h2>
+        <p class="delays__chart-hint">Which vehicle types stop reporting most</p>
+        <%= pie_chart @by_category.transform_values(&:size),
+          colors: @by_category.keys.map { |k| OebbTransitSupport::CATEGORY_CONFIG.dig(k, :color) || "#94a3b8" },
+          donut: true,
+          height: "240px" %>
+      </section>
+    </div>
+
+    <!-- Termination hotspot table -->
+    <section class="delays__chart-section">
+      <h2>Termination Zones</h2>
+      <p class="delays__chart-hint">Locations where 3+ vehicles stopped reporting — likely depots or terminals</p>
+      <div class="delays__table-wrap">
+        <table class="delays__table">
+          <thead>
+            <tr>
+              <th>Location</th>
+              <th>Vehicles</th>
+              <th>Lines</th>
+            </tr>
+          </thead>
+          <tbody>
+            <% @hotspots.each do |lat, lng, count, lines| %>
+              <tr>
+                <td><code><%= "%.3f" % lat %>, <%= "%.3f" % lng %></code></td>
+                <td><strong><%= count %></strong></td>
+                <td>
+                  <% (lines || []).first(8).each do |line| %>
+                    <span class="delays__line-badge" style="background:#64748b"><%= line %></span>
+                  <% end %>
+                  <% if (lines || []).size > 8 %>
+                    <span style="color:#94a3b8;font-size:0.7rem">+<%= lines.size - 8 %></span>
+                  <% end %>
+                </td>
+              </tr>
+            <% end %>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- Recent terminations -->
+    <section class="delays__chart-section">
+      <h2>Recent Terminations</h2>
+      <p class="delays__chart-hint">Last 50 vehicles that stopped reporting</p>
+      <div class="delays__table-wrap">
+        <table class="delays__table">
+          <thead>
+            <tr>
+              <th>Line</th>
+              <th>Direction</th>
+              <th>Last Seen</th>
+              <th>Position</th>
+              <th>Delay</th>
+            </tr>
+          </thead>
+          <tbody>
+            <% @terminated.first(50).each do |vp| %>
+              <tr>
+                <td>
+                  <%= link_to line_delays_path(line: vp.line), class: "delays__line-link" do %>
+                    <span class="delays__line-badge" style="background:#64748b"><%= vp.line %></span>
+                  <% end %>
+                </td>
+                <td><%= vp.direction.presence || "—" %></td>
+                <td><%= vp.try(:last_seen_at)&.strftime("%H:%M:%S") || "—" %></td>
+                <td><code><%= "%.4f" % vp.lat %>, <%= "%.4f" % vp.lng %></code></td>
+                <td>
+                  <% if vp.delay_seconds.to_i > 0 %>
+                    +<%= (vp.delay_seconds / 60.0).round(1) %> min
+                  <% else %>
+                    On time
+                  <% end %>
+                </td>
+              </tr>
+            <% end %>
+          </tbody>
+        </table>
+      </div>
+    </section>
+  <% else %>
+    <div class="delays__empty">
+      <i class="fa-solid fa-bus" aria-hidden="true"></i>
+      <p>No data yet. Start the collector with <code>bin/jobs</code>.</p>
+    </div>
+  <% end %>
+</div>

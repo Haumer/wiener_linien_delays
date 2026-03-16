@@ -1,11 +1,5 @@
 <% content_for :title, "Delay Statistics — Wien Live" %>
 
-<% content_for :head do %>
-  <script type="module">
-    import "chartkick"
-    import "chart.js"
-  </script>
-<% end %>
 
 <div class="delays-page">
   <header class="delays__header">
@@ -44,7 +38,7 @@
         <span class="summary-card__label">On time</span>
       </div>
       <div class="summary-card summary-card--warning">
-        <span class="summary-card__value"><%= @disrupted_lines.size %></span>
+        <span class="summary-card__value"><%= @current_health.select(&:delayed?).size %></span>
         <span class="summary-card__label">Delayed</span>
       </div>
       <div class="summary-card summary-card--severe">
@@ -68,34 +62,44 @@
         height: "220px" %>
     </section>
 
-    <!-- Most delayed lines table -->
+    <!-- Reliability table -->
     <section class="delays__chart-section">
-      <h2>Most Delayed Lines (24h)</h2>
+      <h2>Line Reliability (24h)</h2>
+      <p class="delays__chart-hint">Percentage of time each line was on-time — lower = less reliable</p>
+
       <div class="delays__table-wrap">
         <table class="delays__table">
           <thead>
             <tr>
               <th>Line</th>
               <th>Type</th>
-              <th>Avg Delay</th>
-              <th>Peak Delay</th>
-              <th>Avg Max</th>
-              <th>Samples</th>
+              <th>Reliability</th>
+              <th>Trend</th>
+              <th>Status</th>
             </tr>
           </thead>
           <tbody>
-            <% @worst_lines.each do |line, category, color, avg_max, peak, avg_avg, samples| %>
+            <% @reliability.each do |line, score, category, color| %>
               <tr>
                 <td>
-                  <span class="delays__line-badge" style="background:<%= color %>">
-                    <%= line %>
-                  </span>
+                  <%= link_to line_delays_path(line: line), class: "delays__line-link" do %>
+                    <span class="delays__line-badge" style="background:<%= color || '#64748b' %>"><%= line %></span>
+                  <% end %>
                 </td>
                 <td class="delays__category"><%= OebbTransitSupport::CATEGORY_CONFIG.dig(category, :label) || category %></td>
-                <td><%= (avg_avg.to_f / 60).round(1) %> min</td>
-                <td><%= (peak.to_f / 60).round(1) %> min</td>
-                <td><%= (avg_max.to_f / 60).round(1) %> min</td>
-                <td><%= samples %></td>
+                <td><strong><%= score %>%</strong></td>
+                <td class="delays__trend">—</td>
+                <td>
+                  <% if score >= 95 %>
+                    <span class="reliability-badge reliability-badge--great">Excellent</span>
+                  <% elsif score >= 80 %>
+                    <span class="reliability-badge reliability-badge--good">Good</span>
+                  <% elsif score >= 60 %>
+                    <span class="reliability-badge reliability-badge--fair">Fair</span>
+                  <% else %>
+                    <span class="reliability-badge reliability-badge--poor">Poor</span>
+                  <% end %>
+                </td>
               </tr>
             <% end %>
           </tbody>
@@ -103,123 +107,23 @@
       </div>
     </section>
 
-    <div class="delays__grid">
-      <!-- Disruption frequency -->
-      <section class="delays__chart-section">
-        <h2>Disruption Frequency (24h)</h2>
-        <p class="delays__chart-hint">Number of delayed snapshots per line</p>
-        <%= bar_chart @disruption_frequency,
-          colors: ["#ef4444"],
-          library: {
-            indexAxis: "y",
-            plugins: { legend: { display: false } },
-            scales: { x: { beginAtZero: true } }
-          },
-          height: "280px" %>
-      </section>
-
-      <!-- Avg delay by category -->
-      <section class="delays__chart-section">
-        <h2>Avg Delay by Category</h2>
-        <p class="delays__chart-hint">Average delay in minutes per transport type</p>
-        <%= column_chart @category_avg_delays,
-          suffix: " min",
-          colors: OebbTransitSupport::CATEGORY_CONFIG.values.map { |c| c[:color] },
-          library: {
-            plugins: { legend: { display: false } },
-            scales: { y: { beginAtZero: true } }
-          },
-          height: "280px" %>
-      </section>
-    </div>
-
-    <!-- Per-line detail charts -->
-    <% if @line_charts.any? %>
-      <section class="delays__chart-section">
-        <h2>Worst Lines — Delay Timeline (24h)</h2>
-        <p class="delays__chart-hint">Peak delay trend for the 5 most delayed lines</p>
-        <% line_chart_data = @line_charts.map { |line, data| { name: line, data: data } } %>
-        <%= line_chart line_chart_data,
-          suffix: " min",
-          colors: ["#e53935", "#1e88e5", "#43a047", "#f59e0b", "#8e24aa"],
-          library: {
-            scales: { y: { beginAtZero: true } },
-            elements: { point: { radius: 0 }, line: { tension: 0.3, borderWidth: 2 } }
-          },
-          height: "300px" %>
-      </section>
-    <% end %>
-
-    <!-- When do delays happen? -->
-    <% if @delay_by_hour.any? { |_, data| data.any? } %>
-      <section class="delays__chart-section">
-        <h2>When Do Delays Start?</h2>
-        <p class="delays__chart-hint">Average delay by hour of day for the worst lines — spot the rush-hour patterns</p>
-        <% hour_data = @delay_by_hour.select { |_, d| d.any? }.map { |line, data| { name: line, data: data } } %>
-        <%= line_chart hour_data,
-          suffix: " min",
-          colors: ["#e53935", "#1e88e5", "#43a047", "#f59e0b", "#8e24aa"],
-          library: {
-            scales: { y: { beginAtZero: true } },
-            elements: { point: { radius: 3 }, line: { tension: 0.3, borderWidth: 2 } }
-          },
-          height: "280px" %>
-      </section>
-    <% end %>
-
-    <!-- Where do delays cluster? -->
-    <% if @delay_hotspots.any? %>
-      <section class="delays__chart-section">
-        <h2>Delay Hotspots</h2>
-        <p class="delays__chart-hint">Lines and directions with the highest average delays (2+ min, 3+ occurrences)</p>
-        <div class="delays__table-wrap">
-          <table class="delays__table">
-            <thead>
-              <tr>
-                <th>Line</th>
-                <th>Direction</th>
-                <th>Avg Delay</th>
-                <th>Peak</th>
-                <th>Occurrences</th>
-              </tr>
-            </thead>
-            <tbody>
-              <% @delay_hotspots.each do |line, direction, avg_delay, peak, count| %>
-                <tr>
-                  <td><span class="delays__line-badge" style="background:#64748b"><%= line %></span></td>
-                  <td><%= direction.presence || "—" %></td>
-                  <td><%= (avg_delay.to_f / 60).round(1) %> min</td>
-                  <td><%= (peak.to_f / 60).round(1) %> min</td>
-                  <td><%= count %></td>
-                </tr>
-              <% end %>
-            </tbody>
-          </table>
-        </div>
-      </section>
-    <% end %>
-
     <!-- Current line status -->
     <section class="delays__chart-section">
       <h2>Current Line Status</h2>
-      <div class="delays__status-grid">
-        <% @current_health.each do |line| %>
-          <div class="delays__status-card delays__status-card--<%= line.status %>" style="--line-color:<%= line.category_color %>">
-            <span class="delays__status-badge" style="background:<%= line.category_color %>"><%= line.line %></span>
-            <div class="delays__status-info">
-              <span class="delays__status-delay">
-                <% if line.delayed? %>
-                  +<%= line.max_delay_minutes %> min
-                <% else %>
-                  On time
-                <% end %>
-              </span>
-              <span class="delays__status-meta"><%= line.vehicle_count %> vehicles</span>
-            </div>
-            <span class="delays__status-dot delays__status-dot--<%= line.status %>"></span>
-          </div>
-        <% end %>
-      </div>
+      <% @current_health.group_by(&:category).each do |category, lines| %>
+        <% config = OebbTransitSupport::CATEGORY_CONFIG[category] || { label: category } %>
+        <p class="delays__grid-category"><%= config[:label] %></p>
+        <div class="delays__line-grid">
+          <% lines.sort_by { |l| l.line.to_i == 0 ? l.line : l.line.to_i.to_s.rjust(5, "0") }.each do |line| %>
+            <%= link_to line_delays_path(line: line.line), class: "line-tile line-tile--#{line.status}", title: "#{line.line}: #{line.delayed? ? "+#{line.max_delay_minutes} min" : "on time"}" do %>
+              <span class="line-tile__badge" style="background:<%= line.category_color %>"><%= line.line %></span>
+              <% if line.delayed? %>
+                <span class="line-tile__delay">+<%= line.max_delay_minutes.round %></span>
+              <% end %>
+            <% end %>
+          <% end %>
+        </div>
+      <% end %>
     </section>
   <% end %>
 </div>

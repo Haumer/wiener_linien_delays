@@ -1,0 +1,42 @@
+<% content_for :title, "Network Map — Wien Live" %>
+
+<% content_for :head do %>
+  <link rel="preconnect" href="https://unpkg.com">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="">
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+<% end %>
+
+<div
+  class="network-page"
+  data-controller="network-map"
+  data-network-map-lines-url-value="<%= api_lines_path %>"
+  data-network-map-stops-url-value="<%= api_stops_path %>"
+  data-network-map-line-health-url-value="<%= api_line_health_path %>"
+>
+  <header class="network__topbar">
+    <div class="network__brand">
+      <h1>Vienna Transit Network</h1>
+    </div>
+    <nav class="network__nav">
+      <%= link_to delays_path, class: "network__nav-link" do %>
+        <i class="fa-solid fa-chart-line" aria-hidden="true"></i> Delays
+      <% end %>
+      <%= link_to root_path, class: "network__nav-link" do %>
+        <i class="fa-solid fa-map" aria-hidden="true"></i> Live Map
+      <% end %>
+    </nav>
+  </header>
+
+  <div class="network__legend">
+    <span class="network__legend-item" style="--lc:#e53935"><i></i> Tram</span>
+    <span class="network__legend-item" style="--lc:#1e88e5"><i></i> Bus</span>
+    <span class="network__legend-item" style="--lc:#43a047"><i></i> S-Bahn</span>
+    <span class="network__legend-item" style="--lc:#ff9800"><i></i> Train</span>
+    <span class="network__legend-sep"></span>
+    <span class="network__legend-item"><span class="network__legend-dot network__legend-dot--ok"></span> On time</span>
+    <span class="network__legend-item"><span class="network__legend-dot network__legend-dot--delayed"></span> Delayed</span>
+    <span class="network__legend-item"><span class="network__legend-dot network__legend-dot--severe"></span> Disrupted</span>
+  </div>
+
+  <div class="network__map" data-network-map-target="map"></div>
+</div>
