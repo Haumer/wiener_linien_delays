@@ -1,56 +1,44 @@
-<% content_for :title, "Delay Statistics — Wien Live" %>
-
+<% content_for :title, "Wiener Linien Delay Analysis" %>
 
 <div class="delays-page">
-  <header class="delays__header">
-    <div class="delays__brand">
-      <p class="delays__eyebrow">Vienna public transit</p>
-      <h1>Delay Statistics</h1>
-      <p class="delays__subtitle">
-        <% if @latest_at %>
-          Last updated <%= time_ago_in_words(@latest_at) %> ago · 24-hour rolling window
-        <% else %>
-          Collecting data — statistics will appear once snapshots accumulate.
-        <% end %>
-      </p>
-    </div>
-    <nav class="delays__nav">
-      <%= link_to root_path, class: "delays__back-link" do %>
-        <i class="fa-solid fa-map" aria-hidden="true"></i> Live Map
-      <% end %>
-    </nav>
-  </header>
-
   <% if @latest_at.nil? %>
     <div class="delays__empty">
       <i class="fa-solid fa-chart-line" aria-hidden="true"></i>
       <p>No data yet. Start the background worker with <code>bin/jobs</code> to begin collecting snapshots.</p>
     </div>
   <% else %>
-    <!-- Summary cards -->
-    <section class="delays__summary">
-      <div class="summary-card">
-        <span class="summary-card__value"><%= @current_health.size %></span>
-        <span class="summary-card__label">Lines monitored</span>
+    <!-- Hero: the one number -->
+    <header class="delays__hero">
+      <div class="delays__hero-score delays__hero-score--<%= @network_ontime >= 85 ? 'good' : @network_ontime >= 70 ? 'fair' : 'poor' %>">
+        <span class="delays__hero-number"><%= @network_ontime %>%</span>
+        <span class="delays__hero-label">on time</span>
       </div>
-      <div class="summary-card summary-card--ok">
-        <span class="summary-card__value"><%= @current_health.count { |l| l.status == "ok" } %></span>
-        <span class="summary-card__label">On time</span>
+      <div class="delays__hero-context">
+        <h1>Wiener Linien Delay Analysis</h1>
+        <p>
+          <%= @current_health.size %> lines monitored · <%= @current_health.select(&:delayed?).size %> currently delayed ·
+          Updated <%= time_ago_in_words(@latest_at) %> ago
+        </p>
+        <% if @worst_now.any? %>
+          <p class="delays__hero-worst">
+            Worst right now:
+            <% @worst_now.each do |line| %>
+              <%= link_to line_delays_path(line: line.line), class: "delays__inline-badge", style: "background:#{line.category_color}" do %><%= line.line %> +<%= line.max_delay_minutes.round %>m<% end %>
+            <% end %>
+          </p>
+        <% end %>
       </div>
-      <div class="summary-card summary-card--warning">
-        <span class="summary-card__value"><%= @current_health.select(&:delayed?).size %></span>
-        <span class="summary-card__label">Delayed</span>
-      </div>
-      <div class="summary-card summary-card--severe">
-        <span class="summary-card__value"><%= @current_health.count { |l| l.status == "disrupted" } %></span>
-        <span class="summary-card__label">Disrupted</span>
-      </div>
-    </section>
+      <nav class="delays__nav">
+        <%= link_to root_path, class: "delays__back-link" do %>
+          <i class="fa-solid fa-map" aria-hidden="true"></i> Live Map
+        <% end %>
+      </nav>
+    </header>
 
-    <!-- Network-wide delay trend -->
+    <!-- Network delay trend -->
     <section class="delays__chart-section">
-      <h2>Network Avg Delay (24h)</h2>
-      <p class="delays__chart-hint">Average delay in minutes across all lines, 5-minute intervals</p>
+      <h2>Network Delay Trend</h2>
+      <p class="delays__chart-hint">Average delay across all lines, 24-hour rolling window</p>
       <%= area_chart @delay_over_time,
         suffix: " min",
         colors: ["#f59e0b"],
@@ -59,46 +47,61 @@
           elements: { point: { radius: 0 }, line: { tension: 0.3 } },
           plugins: { legend: { display: false } }
         },
-        height: "220px" %>
+        height: "200px" %>
     </section>
 
-    <!-- Reliability table -->
-    <section class="delays__chart-section">
-      <h2>Line Reliability (24h)</h2>
-      <p class="delays__chart-hint">Percentage of time each line was on-time — lower = less reliable</p>
+    <!-- Top bottleneck stations (network-wide) -->
+    <% if @top_bottlenecks.any? %>
+      <section class="delays__chart-section">
+        <h2>Network Bottleneck Stations</h2>
+        <p class="delays__chart-hint">Stations where delays concentrate most across the entire network</p>
+        <div class="delays__table-wrap">
+          <table class="delays__table">
+            <thead>
+              <tr><th>Station</th><th>Line</th><th>Avg Delay</th><th>Occurrences</th></tr>
+            </thead>
+            <tbody>
+              <% @top_bottlenecks.each do |stop, line, avg_delay, count| %>
+                <tr>
+                  <td><strong><%= stop %></strong></td>
+                  <td>
+                    <%= link_to line_delays_path(line: line), class: "delays__line-link" do %>
+                      <span class="delays__line-badge" style="background:#64748b"><%= line %></span>
+                    <% end %>
+                  </td>
+                  <td><%= (avg_delay.to_f / 60).round(1) %> min</td>
+                  <td><%= count %></td>
+                </tr>
+              <% end %>
+            </tbody>
+          </table>
+        </div>
+      </section>
+    <% end %>
 
+    <!-- Line reliability ranking -->
+    <section class="delays__chart-section">
+      <h2>Line Reliability Ranking</h2>
+      <p class="delays__chart-hint">On-time percentage over the last 24 hours — click any line for detailed analysis</p>
       <div class="delays__table-wrap">
         <table class="delays__table">
           <thead>
-            <tr>
-              <th>Line</th>
-              <th>Type</th>
-              <th>Reliability</th>
-              <th>Trend</th>
-              <th>Status</th>
-            </tr>
+            <tr><th>Line</th><th>Type</th><th>Reliability</th><th>Avg Delay</th><th>Grade</th></tr>
           </thead>
           <tbody>
-            <% @reliability.each do |line, score, category, color| %>
+            <% @line_rankings.each do |r| %>
               <tr>
                 <td>
-                  <%= link_to line_delays_path(line: line), class: "delays__line-link" do %>
-                    <span class="delays__line-badge" style="background:<%= color || '#64748b' %>"><%= line %></span>
+                  <%= link_to line_delays_path(line: r[:line]), class: "delays__line-link" do %>
+                    <span class="delays__line-badge" style="background:<%= r[:color] || '#64748b' %>"><%= r[:line] %></span>
                   <% end %>
                 </td>
-                <td class="delays__category"><%= OebbTransitSupport::CATEGORY_CONFIG.dig(category, :label) || category %></td>
-                <td><strong><%= score %>%</strong></td>
-                <td class="delays__trend">—</td>
+                <td class="delays__category"><%= OebbTransitSupport::CATEGORY_CONFIG.dig(r[:category], :label) || r[:category] %></td>
+                <td><strong><%= r[:score] %>%</strong></td>
+                <td><%= r[:avg_delay] %> min</td>
                 <td>
-                  <% if score >= 95 %>
-                    <span class="reliability-badge reliability-badge--great">Excellent</span>
-                  <% elsif score >= 80 %>
-                    <span class="reliability-badge reliability-badge--good">Good</span>
-                  <% elsif score >= 60 %>
-                    <span class="reliability-badge reliability-badge--fair">Fair</span>
-                  <% else %>
-                    <span class="reliability-badge reliability-badge--poor">Poor</span>
-                  <% end %>
+                  <% grade = if r[:score] >= 95 then "A" elsif r[:score] >= 85 then "B" elsif r[:score] >= 70 then "C" elsif r[:score] >= 50 then "D" else "F" end %>
+                  <span class="grade-badge grade-badge--<%= grade %>"><%= grade %></span>
                 </td>
               </tr>
             <% end %>
@@ -107,9 +110,9 @@
       </div>
     </section>
 
-    <!-- Current line status -->
+    <!-- Line grid -->
     <section class="delays__chart-section">
-      <h2>Current Line Status</h2>
+      <h2>All Lines</h2>
       <% @current_health.group_by(&:category).each do |category, lines| %>
         <% config = OebbTransitSupport::CATEGORY_CONFIG[category] || { label: category } %>
         <p class="delays__grid-category"><%= config[:label] %></p>

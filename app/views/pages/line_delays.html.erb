@@ -1,4 +1,4 @@
-<% content_for :title, "#{@line} Delays — Wien Live" %>
+<% content_for :title, "#{@line} — Delay Analysis" %>
 
 <div class="delays-page">
   <header class="delays__header">
@@ -8,46 +8,47 @@
         <span class="delays__line-badge delays__line-badge--large" style="background:<%= @line_info.category_color %>"><%= @line %></span>
         Line <%= @line %>
       </h1>
-      <p class="delays__subtitle">24-hour delay analysis</p>
     </div>
-    <nav class="delays__nav" style="display:flex;gap:0.5rem">
+    <nav class="delays__nav">
       <%= link_to delays_path, class: "delays__back-link" do %>
-        <i class="fa-solid fa-chart-line" aria-hidden="true"></i> All Lines
-      <% end %>
-      <%= link_to root_path, class: "delays__back-link" do %>
-        <i class="fa-solid fa-map" aria-hidden="true"></i> Live Map
+        <i class="fa-solid fa-arrow-left" aria-hidden="true"></i> All Lines
       <% end %>
     </nav>
   </header>
 
-  <!-- Summary -->
-  <section class="delays__summary">
-    <div class="summary-card">
-      <span class="summary-card__value"><%= @current_vehicles.size %></span>
-      <span class="summary-card__label">Vehicles now</span>
+  <!-- Report card -->
+  <section class="report-card">
+    <div class="report-card__grade report-card__grade--<%= @grade %>">
+      <span class="report-card__letter"><%= @grade %></span>
     </div>
-    <div class="summary-card">
-      <span class="summary-card__value"><%= @current_vehicles.map(&:direction).uniq.size %></span>
-      <span class="summary-card__label">Directions</span>
-    </div>
-    <div class="summary-card summary-card--<%= @line_info.status == 'ok' ? 'ok' : 'warning' %>">
-      <span class="summary-card__value">
-        <% if @line_info.delayed? %>+<%= @line_info.max_delay_minutes %> min<% else %>On time<% end %>
-      </span>
-      <span class="summary-card__label">Current max delay</span>
-    </div>
-    <div class="summary-card">
-      <span class="summary-card__value"><%= @reliability %>%</span>
-      <span class="summary-card__label">Reliability (24h)</span>
+    <div class="report-card__details">
+      <p class="report-card__headline">
+        <strong><%= @reliability %>%</strong> on time · avg delay <strong><%= @avg_delay %> min</strong> · <strong><%= @vehicle_count %></strong> vehicles active
+      </p>
+      <p class="report-card__insight">
+        <% if @worst_station && @worst_station[1].to_f > 60 %>
+          Delays concentrate at <strong><%= @worst_station[0] %></strong> (avg +<%= (@worst_station[1].to_f / 60).round(1) %> min).
+        <% end %>
+        <% if @worst_hour && @worst_hour[1] > 0 %>
+          Worst hour: <strong><%= @worst_hour[0] %></strong> (avg +<%= @worst_hour[1] %> min).
+        <% end %>
+        <% if @reliability >= 95 %>
+          This line is performing well.
+        <% elsif @reliability >= 70 %>
+          Room for improvement — check the station breakdown below.
+        <% else %>
+          Significant reliability issues detected.
+        <% end %>
+      </p>
     </div>
   </section>
 
-  <!-- Station bottleneck chart — where delays accumulate -->
+  <!-- Station bottleneck chart -->
   <section class="delays__chart-section" data-controller="tab-toggle">
     <div class="delays__chart-header">
       <div>
-        <h2>Station Delay Accumulation</h2>
-        <p class="delays__chart-hint">Stations in route order, left to right. Each vehicle that passes adds its delay on top. Tall bars = bottleneck stations.</p>
+        <h2>Where Do Delays Build Up?</h2>
+        <p class="delays__chart-hint">Stations in route order. Each vehicle passing adds its delay. Tall bars = bottleneck stations.</p>
       </div>
       <div class="tab-toggle">
         <button class="tab-toggle__btn tab-toggle__btn--active" data-tab-toggle-target="btn" data-action="click->tab-toggle#switch" data-tab="1d">24h</button>
@@ -57,32 +58,26 @@
 
     <div data-tab-toggle-target="panel" data-tab="1d">
       <% if @station_delays_1d.any? %>
-        <%
-          total_data_1d = @station_delays_1d.map { |name, _, total, _, _| [name, (total.to_f / 60).round(1)] }
-          avg_data_1d = @station_delays_1d.map { |name, avg, _, _, _| [name, (avg.to_f / 60).round(1)] }
-        %>
+        <% total_1d = @station_delays_1d.map { |name, _, total, _, _| [name, (total.to_f / 60).round(1)] } %>
+        <% avg_1d = @station_delays_1d.map { |name, avg, _, _, _| [name, (avg.to_f / 60).round(1)] } %>
         <%= column_chart [
-          { name: "Total accumulated delay", data: total_data_1d },
-          { name: "Avg delay per pass", data: avg_data_1d }
+          { name: "Total accumulated delay", data: total_1d },
+          { name: "Avg delay per vehicle", data: avg_1d }
         ],
-          suffix: " min",
-          colors: ["#ef4444", "#f59e0b"],
+          suffix: " min", colors: ["#ef4444", "#f59e0b"],
           library: {
             plugins: { legend: { position: "bottom" } },
             scales: {
               x: { ticks: { maxRotation: 55, minRotation: 40, font: { size: 9, weight: "bold" } } },
               y: { beginAtZero: true, title: { display: true, text: "Delay (min)" } }
             }
-          },
-          height: "340px" %>
+          }, height: "340px" %>
 
         <div class="delays__table-wrap" style="margin-top:1rem">
           <table class="delays__table">
-            <thead>
-              <tr><th>Stop</th><th>Avg Delay</th><th>Peak</th><th>Total</th><th>Occurrences</th></tr>
-            </thead>
+            <thead><tr><th>Station</th><th>Avg Delay</th><th>Peak</th><th>Total</th><th>Passes</th></tr></thead>
             <tbody>
-              <% @station_delays_1d.first(15).each do |name, avg, total, peak, count| %>
+              <% @station_delays_1d.sort_by { |_, _, total, _, _| -(total || 0).to_f }.first(10).each do |name, avg, total, peak, count| %>
                 <tr>
                   <td><strong><%= name %></strong></td>
                   <td><%= (avg.to_f / 60).round(1) %> min</td>
@@ -95,85 +90,58 @@
           </table>
         </div>
       <% else %>
-        <p class="disruptions__empty">Collecting station-level data — this will populate as new snapshots arrive.</p>
+        <p class="delays__empty-text">Collecting station-level data — chart populates as snapshots arrive.</p>
       <% end %>
     </div>
 
     <div data-tab-toggle-target="panel" data-tab="7d" style="display:none">
       <% if @station_delays_7d.any? %>
-        <%
-          total_data_7d = @station_delays_7d.map { |name, _, total, _, _| [name, (total.to_f / 60).round(1)] }
-          avg_data_7d = @station_delays_7d.map { |name, avg, _, _, _| [name, (avg.to_f / 60).round(1)] }
-        %>
+        <% total_7d = @station_delays_7d.map { |name, _, total, _, _| [name, (total.to_f / 60).round(1)] } %>
+        <% avg_7d = @station_delays_7d.map { |name, avg, _, _, _| [name, (avg.to_f / 60).round(1)] } %>
         <%= column_chart [
-          { name: "Total accumulated delay", data: total_data_7d },
-          { name: "Avg delay per pass", data: avg_data_7d }
+          { name: "Total accumulated delay", data: total_7d },
+          { name: "Avg delay per vehicle", data: avg_7d }
         ],
-          suffix: " min",
-          colors: ["#dc2626", "#f59e0b"],
+          suffix: " min", colors: ["#dc2626", "#f59e0b"],
           library: {
             plugins: { legend: { position: "bottom" } },
             scales: {
               x: { ticks: { maxRotation: 55, minRotation: 40, font: { size: 9, weight: "bold" } } },
               y: { beginAtZero: true, title: { display: true, text: "Delay (min)" } }
             }
-          },
-          height: "340px" %>
-
-        <div class="delays__table-wrap" style="margin-top:1rem">
-          <table class="delays__table">
-            <thead>
-              <tr><th>Stop</th><th>Avg Delay</th><th>Peak</th><th>Total</th><th>Occurrences</th></tr>
-            </thead>
-            <tbody>
-              <% @station_delays_7d.first(15).each do |name, avg, total, peak, count| %>
-                <tr>
-                  <td><strong><%= name %></strong></td>
-                  <td><%= (avg.to_f / 60).round(1) %> min</td>
-                  <td><%= (peak.to_f / 60).round(1) %> min</td>
-                  <td><%= (total.to_f / 60).round(0) %> min</td>
-                  <td><%= count %></td>
-                </tr>
-              <% end %>
-            </tbody>
-          </table>
-        </div>
+          }, height: "340px" %>
       <% else %>
-        <p class="disruptions__empty">Need 7 days of data — keep the collector running.</p>
+        <p class="delays__empty-text">Need 7 days of data.</p>
       <% end %>
     </div>
   </section>
 
-  <!-- Peak vs avg delay -->
+  <!-- Delay trend -->
   <section class="delays__chart-section">
-    <h2>Peak vs Average Delay (24h)</h2>
-    <p class="delays__chart-hint">Peak delay (worst single vehicle) vs average across all vehicles on this line</p>
+    <h2>Delay Trend</h2>
+    <p class="delays__chart-hint">Peak delay (worst vehicle) vs average across all vehicles on this line</p>
     <%= line_chart [
-      { name: "Peak delay", data: @delay_trend },
-      { name: "Avg delay", data: @avg_trend }
+      { name: "Peak", data: @delay_trend },
+      { name: "Average", data: @avg_trend }
     ],
-      suffix: " min",
-      colors: ["#ef4444", "#f59e0b"],
+      suffix: " min", colors: ["#ef4444", "#f59e0b"],
       library: {
         scales: { y: { beginAtZero: true } },
         elements: { point: { radius: 0 }, line: { tension: 0.3, borderWidth: 2 } }
-      },
-      height: "260px" %>
+      }, height: "240px" %>
   </section>
 
-  <!-- When do delays happen? -->
+  <!-- When do delays happen -->
   <% if @delay_by_hour.any? %>
     <section class="delays__chart-section">
-      <h2>When Do Delays Start?</h2>
-      <p class="delays__chart-hint">Average delay by hour of day — spot the rush-hour patterns</p>
+      <h2>Delay by Hour of Day</h2>
+      <p class="delays__chart-hint">When does this line get delayed? Higher bars = worse hours.</p>
       <%= column_chart @delay_by_hour,
-        suffix: " min",
-        colors: ["#f59e0b"],
+        suffix: " min", colors: ["#f59e0b"],
         library: {
           plugins: { legend: { display: false } },
           scales: { y: { beginAtZero: true, title: { display: true, text: "Avg delay (min)" } } }
-        },
-        height: "260px" %>
+        }, height: "240px" %>
     </section>
   <% end %>
 </div>

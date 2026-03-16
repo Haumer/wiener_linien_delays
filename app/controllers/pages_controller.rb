@@ -1,101 +1,84 @@
 class PagesController < ApplicationController
-  skip_before_action :authenticate_user!, only: [ :home, :delays, :line_delays, :network, :fleet ]
+  include OebbTransitSupport
+
+  skip_before_action :authenticate_user!, only: [:home, :delays, :line_delays]
 
   def home
   end
 
-  def network
-  end
+  def delays
+    @latest_at = LineHealthSummary.latest_timestamp
+    return unless @latest_at
 
-  def fleet
-    latest = TransitSnapshot.latest
-    @latest_at = latest&.fetched_at
+    range_start = 24.hours.ago
+    @current_health = LineHealthSummary.current.order(:category, :line)
+    all_summaries = LineHealthSummary.in_range(range_start, Time.current)
 
-    if latest
-      # Journey IDs currently active
-      active_ids = VehiclePosition.where(transit_snapshot: latest).pluck(:journey_id)
+    # Network-wide on-time rate
+    total_snapshots = all_summaries.count
+    ok_snapshots = all_summaries.where(status: "ok").count
+    @network_ontime = total_snapshots > 0 ? (ok_snapshots.to_f / total_snapshots * 100).round(1) : 100
 
-      # Last known position for every journey_id seen in the last 24h
-      # that is NOT in the current snapshot (= terminated)
-      range_start = 24.hours.ago
+    # Network delay trend (area chart)
+    @delay_over_time = all_summaries
+      .group_by_period(:minute, :recorded_at, n: 5)
+      .average(:avg_delay_seconds)
+      .transform_values { |v| ((v || 0) / 60.0).round(1) }
 
-      last_positions_sql = VehiclePosition
-        .joins(:transit_snapshot)
-        .where(transit_snapshots: { fetched_at: range_start.. })
-        .where.not(journey_id: active_ids)
-        .select("DISTINCT ON (vehicle_positions.journey_id) vehicle_positions.*, transit_snapshots.fetched_at AS last_seen_at")
-        .order("vehicle_positions.journey_id, transit_snapshots.fetched_at DESC")
+    # Per-line reliability ranking
+    total_by_line = all_summaries.group(:line).count
+    ok_by_line = all_summaries.where(status: "ok").group(:line).count
+    avg_delay_by_line = all_summaries.group(:line).average(:avg_delay_seconds)
 
-      @terminated = VehiclePosition.from(last_positions_sql, :vehicle_positions)
-        .order("last_seen_at DESC")
-        .limit(500)
+    @line_rankings = total_by_line.map { |line, total|
+      ok = ok_by_line[line] || 0
+      score = total > 0 ? (ok.to_f / total * 100).round(1) : 100
+      avg_delay = ((avg_delay_by_line[line] || 0) / 60.0).round(1)
+      meta = all_summaries.where(line: line).pick(:category, :category_color)
+      { line: line, score: score, avg_delay: avg_delay, category: meta&.first, color: meta&.last }
+    }.sort_by { |r| r[:score] }
 
-      # Currently active fleet
-      @active = VehiclePosition.where(transit_snapshot: latest).order(:category, :line)
+    # Top 5 bottleneck stations network-wide
+    @top_bottlenecks = StopDelayRecord
+      .joins(:transit_snapshot)
+      .where(transit_snapshots: { fetched_at: range_start.. })
+      .where("stop_delay_records.delay_seconds > 0")
+      .group(:stop_name, :line)
+      .having("COUNT(*) >= 5")
+      .order("avg_delay DESC")
+      .limit(8)
+      .pluck(
+        :stop_name, :line,
+        Arel.sql("ROUND(AVG(stop_delay_records.delay_seconds)) as avg_delay"),
+        Arel.sql("COUNT(*) as occurrences")
+      )
 
-      # Termination hotspots — cluster by approximate location (rounded to ~200m grid)
-      @hotspots = VehiclePosition
-        .joins(:transit_snapshot)
-        .where(transit_snapshots: { fetched_at: range_start.. })
-        .where.not(journey_id: active_ids)
-        .group(
-          Arel.sql("ROUND(CAST(vehicle_positions.lat AS numeric), 3)"),
-          Arel.sql("ROUND(CAST(vehicle_positions.lng AS numeric), 3)")
-        )
-        .having("COUNT(*) >= 3")
-        .order("termination_count DESC")
-        .limit(30)
-        .pluck(
-          Arel.sql("ROUND(CAST(vehicle_positions.lat AS numeric), 3) as grid_lat"),
-          Arel.sql("ROUND(CAST(vehicle_positions.lng AS numeric), 3) as grid_lng"),
-          Arel.sql("COUNT(*) as termination_count"),
-          Arel.sql("array_agg(DISTINCT vehicle_positions.line ORDER BY vehicle_positions.line) as lines")
-        )
-
-      # Terminations by hour
-      @by_hour = VehiclePosition
-        .joins(:transit_snapshot)
-        .where(transit_snapshots: { fetched_at: range_start.. })
-        .where.not(journey_id: active_ids)
-        .joins("INNER JOIN (
-          SELECT journey_id, MAX(transit_snapshot_id) as last_snap
-          FROM vehicle_positions
-          INNER JOIN transit_snapshots ON transit_snapshots.id = vehicle_positions.transit_snapshot_id
-          WHERE transit_snapshots.fetched_at >= '#{range_start.utc.iso8601}'
-          GROUP BY journey_id
-        ) lasts ON vehicle_positions.journey_id = lasts.journey_id AND vehicle_positions.transit_snapshot_id = lasts.last_snap")
-        .group(Arel.sql("EXTRACT(HOUR FROM transit_snapshots.fetched_at)::int"))
-        .order(Arel.sql("EXTRACT(HOUR FROM transit_snapshots.fetched_at)::int"))
-        .count
-        .transform_keys { |h| "#{h.to_s.rjust(2, '0')}:00" }
-
-      # By category
-      @by_category = @terminated.group_by(&:category)
-    else
-      @terminated = []
-      @active = []
-      @hotspots = []
-      @by_hour = {}
-      @by_category = {}
-    end
+    # Worst lines right now (for the headline)
+    @worst_now = @current_health.select(&:delayed?).sort_by { |l| -l.max_delay_seconds }.first(5)
   end
 
   def line_delays
     @line = params[:line]
     range_start = 24.hours.ago
 
-    # Line info from latest snapshot
     @line_info = LineHealthSummary.current.find_by(line: @line)
     return redirect_to(delays_path, alert: "Line not found") unless @line_info
 
-    # Get real stop order from live vehicle data
-    @stop_order = ordered_stops_for_line(@line)
+    # Reliability
+    total = LineHealthSummary.for_line(@line).in_range(range_start, Time.current).count
+    ok = LineHealthSummary.for_line(@line).in_range(range_start, Time.current).where(status: "ok").count
+    @reliability = total > 0 ? (ok.to_f / total * 100).round(1) : 100
+    @grade = reliability_grade(@reliability)
 
-    # Station delay accumulation — which stops are the bottlenecks?
+    # Station bottleneck data
+    @stop_order = ordered_stops_for_line(@line)
     @station_delays_1d = station_delay_profile(@line, 24.hours.ago, @stop_order)
     @station_delays_7d = station_delay_profile(@line, 7.days.ago, @stop_order)
 
-    # Delay trend for this line
+    # Worst station (for auto-generated insight)
+    @worst_station = @station_delays_1d.max_by { |_, avg, _, _, _| avg.to_f }
+
+    # Delay trend
     @delay_trend = LineHealthSummary.for_line(@line)
       .in_range(range_start, Time.current)
       .group_by_period(:minute, :recorded_at, n: 5)
@@ -108,22 +91,11 @@ class PagesController < ApplicationController
       .average(:avg_delay_seconds)
       .transform_values { |v| ((v || 0) / 60.0).round(1) }
 
-    # Current vehicles on this line from latest snapshot
+    # Current vehicle count
     latest_snapshot = TransitSnapshot.latest
-    @current_vehicles = if latest_snapshot
-      VehiclePosition
-        .where(transit_snapshot: latest_snapshot, line: @line)
-        .order(:direction, :lat)
-    else
-      VehiclePosition.none
-    end
+    @vehicle_count = latest_snapshot ? VehiclePosition.where(transit_snapshot: latest_snapshot, line: @line).count : 0
 
-    # Reliability for this line
-    total = LineHealthSummary.for_line(@line).in_range(range_start, Time.current).count
-    ok = LineHealthSummary.for_line(@line).in_range(range_start, Time.current).where(status: "ok").count
-    @reliability = total > 0 ? (ok.to_f / total * 100).round(1) : 100
-
-    # When do delays happen? Avg delay by hour of day for this line
+    # Hour-of-day pattern
     @delay_by_hour = VehiclePosition
       .joins(:transit_snapshot)
       .where(line: @line)
@@ -133,36 +105,27 @@ class PagesController < ApplicationController
       .average(:delay_seconds)
       .sort_by(&:first)
       .to_h { |hour, avg| ["#{hour.to_i.to_s.rjust(2, '0')}:00", ((avg || 0) / 60.0).round(1)] }
-  end
 
-  def delays
-    @current_health = LineHealthSummary.current.order(:category, :line)
-    @latest_at = LineHealthSummary.latest_timestamp
+    # Worst hour (for insight text)
+    @worst_hour = @delay_by_hour.max_by { |_, v| v }
 
-    # Stats for the last 24 hours
-    range_start = 24.hours.ago
-    @all_summaries = LineHealthSummary.in_range(range_start, Time.current)
-
-    # Delay distribution over time (for the area chart)
-    @delay_over_time = @all_summaries
-      .group_by_period(:minute, :recorded_at, n: 5)
+    # Average delay
+    @avg_delay = LineHealthSummary.for_line(@line)
+      .in_range(range_start, Time.current)
       .average(:avg_delay_seconds)
-      .transform_values { |v| ((v || 0) / 60.0).round(1) }
-
-    # Reliability score: % of snapshots where status was "ok" per line
-    total_by_line = @all_summaries.group(:line).count
-    ok_by_line = @all_summaries.where(status: "ok").group(:line).count
-    @reliability = total_by_line
-      .map { |line, total|
-        ok = ok_by_line[line] || 0
-        score = total > 0 ? (ok.to_f / total * 100).round(1) : 0
-        category_row = @all_summaries.where(line: line).pick(:category, :category_color)
-        [line, score, category_row&.first, category_row&.last]
-      }
-      .sort_by { |_, score, _, _| score }
+    @avg_delay = ((@avg_delay || 0) / 60.0).round(1)
   end
 
   private
+
+  def reliability_grade(score)
+    if score >= 95 then "A"
+    elsif score >= 85 then "B"
+    elsif score >= 70 then "C"
+    elsif score >= 50 then "D"
+    else "F"
+    end
+  end
 
   def station_delay_profile(line, since, stop_order)
     records = StopDelayRecord
@@ -180,7 +143,6 @@ class PagesController < ApplicationController
         Arel.sql("COUNT(*) as occurrences")
       )
 
-    # Use the live-derived stop order; fall back to alphabetical for unknown stops
     all_ordered = stop_order.values.flatten
     stop_stats.sort_by do |name, _, _, _, _|
       idx = all_ordered.index(name)
@@ -192,7 +154,6 @@ class PagesController < ApplicationController
     snapshot = TransitSnapshot.latest
     return {} unless snapshot
 
-    # Get stop sequences per vehicle from the latest snapshot
     records = StopDelayRecord
       .where(transit_snapshot: snapshot, line: line)
       .where.not(journey_id: [nil, ""])
@@ -209,7 +170,6 @@ class PagesController < ApplicationController
     end
   end
 
-  # Topological sort to merge overlapping stop sequences into one ordered list
   def merge_stop_sequences(sequences)
     return [] if sequences.empty?
 
@@ -226,7 +186,6 @@ class PagesController < ApplicationController
       end
     end
 
-    # Kahn's algorithm
     queue = all_stops.select { |s| pred_count[s] == 0 }
     result = []
 
@@ -239,7 +198,6 @@ class PagesController < ApplicationController
       end
     end
 
-    # Append any stops caught in cycles
     result + (all_stops - result)
   end
 end
