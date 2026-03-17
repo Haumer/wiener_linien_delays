@@ -1,4 +1,0 @@
-route_id,service_id,trip_id,trip_headsign,shape_id
-oebb_s80,weekday,oebb_trip_s80,Hauptbahnhof,oebb_shape_s80
-oebb_rjx,weekday,oebb_trip_rjx,Flughafen Wien,oebb_shape_rjx
-oebb_bus,weekday,oebb_trip_bus,Erdberg,oebb_shape_bus

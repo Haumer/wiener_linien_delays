@@ -1,4 +1,0 @@
-route_id,route_short_name,route_long_name,route_type
-oebb_s80,S80,S-Bahn S80,2
-oebb_rjx,RJX 860,Railjet Xpress 860,2
-oebb_bus,VAL,Regional Bus,3

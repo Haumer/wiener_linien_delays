@@ -1,3 +1,0 @@
-stop_id,stop_name,stop_lat,stop_lon
-oebb_stop_vienna,Wien Hbf,48.1855,16.3744
-oebb_stop_outer,Salzburg Hbf,47.8133,13.0458
