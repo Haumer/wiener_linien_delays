@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[7.1].define(version: 2026_03_16_103442) do
+ActiveRecord::Schema[7.1].define(version: 2026_03_17_100645) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "plpgsql"
 
@@ -24,6 +24,9 @@ ActiveRecord::Schema[7.1].define(version: 2026_03_16_103442) do
     t.integer "max_delay_seconds", default: 0, null: false
     t.integer "stalled_count", default: 0, null: false
     t.string "status", default: "ok", null: false
+    t.string "city", default: "wien", null: false
+    t.index ["city", "line", "recorded_at"], name: "index_line_health_summaries_on_city_and_line_and_recorded_at"
+    t.index ["city", "recorded_at"], name: "index_line_health_summaries_on_city_and_recorded_at"
     t.index ["line", "recorded_at"], name: "index_line_health_summaries_on_line_and_recorded_at"
     t.index ["recorded_at"], name: "index_line_health_summaries_on_recorded_at"
     t.index ["status"], name: "index_line_health_summaries_on_status"
@@ -159,6 +162,7 @@ ActiveRecord::Schema[7.1].define(version: 2026_03_16_103442) do
     t.integer "delay_seconds", default: 0, null: false
     t.integer "stop_sequence", default: 0, null: false
     t.string "journey_id"
+    t.string "city", default: "wien", null: false
     t.index ["line", "stop_name"], name: "index_stop_delay_records_on_line_and_stop_name"
     t.index ["line", "transit_snapshot_id"], name: "index_stop_delay_records_on_line_and_transit_snapshot_id"
     t.index ["transit_snapshot_id"], name: "index_stop_delay_records_on_transit_snapshot_id"
@@ -169,6 +173,8 @@ ActiveRecord::Schema[7.1].define(version: 2026_03_16_103442) do
     t.integer "vehicle_count", default: 0, null: false
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.string "city", default: "wien", null: false
+    t.index ["city", "fetched_at"], name: "index_transit_snapshots_on_city_and_fetched_at"
     t.index ["fetched_at"], name: "index_transit_snapshots_on_fetched_at"
   end
 
@@ -195,6 +201,7 @@ ActiveRecord::Schema[7.1].define(version: 2026_03_16_103442) do
     t.integer "delay_seconds"
     t.boolean "stalled", default: false, null: false
     t.string "next_stop_name"
+    t.string "city", default: "wien", null: false
     t.index ["journey_id", "transit_snapshot_id"], name: "index_vehicle_positions_on_journey_id_and_transit_snapshot_id"
     t.index ["line", "transit_snapshot_id"], name: "index_vehicle_positions_on_line_and_transit_snapshot_id"
     t.index ["transit_snapshot_id"], name: "index_vehicle_positions_on_transit_snapshot_id"

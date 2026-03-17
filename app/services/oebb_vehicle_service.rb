@@ -6,8 +6,9 @@ class OebbVehicleService
     urCrd: { x: 16_580_000, y: 48_330_000 }
   }.freeze
 
-  def initialize(client: OebbHafasClient.new)
+  def initialize(client: OebbHafasClient.new, rect: VIENNA_RECT)
     @client = client
+    @rect = rect
   end
 
   def call
@@ -16,7 +17,7 @@ class OebbVehicleService
       {
         maxJny: 1000,
         onlyRT: true,
-        rect: VIENNA_RECT
+        rect: @rect
       }
     )
 

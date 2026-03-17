@@ -13,6 +13,43 @@
   margin-bottom: 2rem;
 }
 
+// City switcher
+.city-switcher {
+  display: flex;
+  gap: 0.35rem;
+  margin-bottom: 1.25rem;
+}
+
+.city-switcher__btn {
+  padding: 0.4rem 0.85rem;
+  border: 1px solid #e2e8f0;
+  border-radius: 999px;
+  background: #fff;
+  color: #64748b;
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-decoration: none;
+  transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
+
+  &:hover {
+    background: #f8fafc;
+    border-color: #cbd5e1;
+    color: #334155;
+  }
+}
+
+.city-switcher__btn--active {
+  background: #0f172a;
+  border-color: #0f172a;
+  color: #fff;
+
+  &:hover {
+    background: #1e293b;
+    border-color: #1e293b;
+    color: #fff;
+  }
+}
+
 // Hero section
 .delays__hero {
   display: flex;

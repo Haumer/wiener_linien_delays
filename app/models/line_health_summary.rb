@@ -3,7 +3,9 @@ class LineHealthSummary < ApplicationRecord
 
   STATUSES = %w[ok minor_delay major_delay disrupted].freeze
 
+  scope :for_city, ->(city) { where(city: city) }
   scope :current, -> { where(recorded_at: latest_timestamp) }
+  scope :current_for, ->(city) { for_city(city).where(recorded_at: for_city(city).maximum(:recorded_at)) }
   scope :for_line, ->(line) { where(line: line) }
   scope :in_range, ->(from, to) { where(recorded_at: from..to) }
   scope :delayed, -> { where.not(status: "ok") }
@@ -11,6 +13,10 @@ class LineHealthSummary < ApplicationRecord
 
   def self.latest_timestamp
     maximum(:recorded_at)
+  end
+
+  def self.latest_timestamp_for(city)
+    for_city(city).maximum(:recorded_at)
   end
 
   def delayed?

@@ -7,6 +7,16 @@
       <p>No data yet. Start the background worker with <code>bin/jobs</code> to begin collecting snapshots.</p>
     </div>
   <% else %>
+    <!-- City switcher -->
+    <nav class="city-switcher">
+      <% @cities.each do |key, config| %>
+        <%= link_to delays_path(city: key),
+          class: "city-switcher__btn #{key == @city ? 'city-switcher__btn--active' : ''}" do %>
+          <%= config[:name] %>
+        <% end %>
+      <% end %>
+    </nav>
+
     <!-- Hero: the one number -->
     <header class="delays__hero">
       <div class="delays__hero-score delays__hero-score--<%= @network_ontime >= 85 ? 'good' : @network_ontime >= 70 ? 'fair' : 'poor' %>">
@@ -14,7 +24,7 @@
         <span class="delays__hero-label">on time</span>
       </div>
       <div class="delays__hero-context">
-        <h1>Wiener Linien Delay Analysis</h1>
+        <h1><%= @city_config[:name] %> Delay Analysis</h1>
         <p>
           <%= @current_health.size %> lines monitored · <%= @current_health.select(&:delayed?).size %> currently delayed ·
           Updated <%= time_ago_in_words(@latest_at) %> ago
@@ -23,7 +33,7 @@
           <p class="delays__hero-worst">
             Worst right now:
             <% @worst_now.each do |line| %>
-              <%= link_to line_delays_path(line: line.line), class: "delays__inline-badge", style: "background:#{line.category_color}" do %><%= line.line %> +<%= line.max_delay_minutes.round %>m<% end %>
+              <%= link_to line_delays_path(city: @city, line: line.line), class: "delays__inline-badge", style: "background:#{line.category_color}" do %><%= line.line %> +<%= line.max_delay_minutes.round %>m<% end %>
             <% end %>
           </p>
         <% end %>
@@ -65,7 +75,7 @@
                 <tr>
                   <td><strong><%= stop %></strong></td>
                   <td>
-                    <%= link_to line_delays_path(line: line), class: "delays__line-link" do %>
+                    <%= link_to line_delays_path(city: @city, line: line), class: "delays__line-link" do %>
                       <span class="delays__line-badge" style="background:#64748b"><%= line %></span>
                     <% end %>
                   </td>
@@ -92,7 +102,7 @@
             <% @line_rankings.each do |r| %>
               <tr>
                 <td>
-                  <%= link_to line_delays_path(line: r[:line]), class: "delays__line-link" do %>
+                  <%= link_to line_delays_path(city: @city, line: r[:line]), class: "delays__line-link" do %>
                     <span class="delays__line-badge" style="background:<%= r[:color] || '#64748b' %>"><%= r[:line] %></span>
                   <% end %>
                 </td>
@@ -118,7 +128,7 @@
         <p class="delays__grid-category"><%= config[:label] %></p>
         <div class="delays__line-grid">
           <% lines.sort_by { |l| l.line.to_i == 0 ? l.line : l.line.to_i.to_s.rjust(5, "0") }.each do |line| %>
-            <%= link_to line_delays_path(line: line.line), class: "line-tile line-tile--#{line.status}", title: "#{line.line}: #{line.delayed? ? "+#{line.max_delay_minutes} min" : "on time"}" do %>
+            <%= link_to line_delays_path(city: @city, line: line.line), class: "line-tile line-tile--#{line.status}", title: "#{line.line}: #{line.delayed? ? "+#{line.max_delay_minutes} min" : "on time"}" do %>
               <span class="line-tile__badge" style="background:<%= line.category_color %>"><%= line.line %></span>
               <% if line.delayed? %>
                 <span class="line-tile__delay">+<%= line.max_delay_minutes.round %></span>

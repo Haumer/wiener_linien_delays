@@ -6,16 +6,32 @@ class CollectTransitSnapshotJob < ApplicationJob
   STALL_THRESHOLD_DEGREES = 0.00005
 
   def perform
-    data = OebbVehicleService.new.call
+    CityConfig.enabled.each do |city_key|
+      collect_city(city_key)
+    rescue OebbHafasClient::Error => e
+      Rails.logger.warn("Transit snapshot failed for #{city_key}: #{e.message}")
+    rescue StandardError => e
+      Rails.logger.error("Unexpected error collecting #{city_key}: #{e.message}")
+    end
+  end
+
+  private
+
+  def collect_city(city_key)
+    config = CityConfig.find(city_key)
+    return unless config
+
+    data = OebbVehicleService.new(rect: config[:rect]).call
     vehicles = data[:vehicles] || []
     fetched_at = data[:fetched_at] ? Time.parse(data[:fetched_at]) : Time.current
 
     snapshot = TransitSnapshot.create!(
+      city: city_key,
       fetched_at: fetched_at,
       vehicle_count: vehicles.size
     )
 
-    previous_positions = load_previous_positions
+    previous_positions = load_previous_positions(city_key)
     line_buckets = Hash.new { |h, k| h[k] = { delays: [], stalled: 0, vehicles: 0, category: nil, color: nil } }
 
     records = vehicles.map do |vehicle|
@@ -32,6 +48,7 @@ class CollectTransitSnapshotJob < ApplicationJob
 
       {
         transit_snapshot_id: snapshot.id,
+        city: city_key,
         journey_id: vehicle[:id],
         line: line,
         category: vehicle[:category],
@@ -45,13 +62,9 @@ class CollectTransitSnapshotJob < ApplicationJob
     end
 
     VehiclePosition.insert_all(records) if records.any?
-    record_stop_delays(snapshot, vehicles)
-    record_line_health(line_buckets, fetched_at)
-  rescue OebbHafasClient::Error => e
-    Rails.logger.warn("Transit snapshot collection failed: #{e.message}")
+    record_stop_delays(snapshot, city_key, vehicles)
+    record_line_health(city_key, line_buckets, fetched_at)
   end
-
-  private
 
   def compute_delay(vehicle)
     stop = (vehicle[:next_stops] || []).find { |s| s[:realtime_at] && s[:scheduled_at] }
@@ -72,8 +85,8 @@ class CollectTransitSnapshotJob < ApplicationJob
       (vehicle[:lng] - previous[:lng]).abs < STALL_THRESHOLD_DEGREES
   end
 
-  def load_previous_positions
-    last_snapshot = TransitSnapshot.order(fetched_at: :desc).offset(0).first
+  def load_previous_positions(city_key)
+    last_snapshot = TransitSnapshot.where(city: city_key).order(fetched_at: :desc).first
     return {} unless last_snapshot
 
     VehiclePosition
@@ -82,14 +95,12 @@ class CollectTransitSnapshotJob < ApplicationJob
       .to_h { |jid, lat, lng| [jid, { lat: lat.to_f, lng: lng.to_f }] }
   end
 
-  def record_stop_delays(snapshot, vehicles)
+  def record_stop_delays(snapshot, city_key, vehicles)
     records = []
 
     vehicles.each do |vehicle|
       line = vehicle[:line].presence || vehicle[:name]
-      next_stops = vehicle[:next_stops] || []
-
-      next_stops.each_with_index do |stop, i|
+      (vehicle[:next_stops] || []).each_with_index do |stop, i|
         next unless stop[:name].present?
 
         delay = if stop[:realtime_at] && stop[:scheduled_at]
@@ -100,6 +111,7 @@ class CollectTransitSnapshotJob < ApplicationJob
 
         records << {
           transit_snapshot_id: snapshot.id,
+          city: city_key,
           journey_id: vehicle[:id],
           line: line,
           category: vehicle[:category],
@@ -116,14 +128,12 @@ class CollectTransitSnapshotJob < ApplicationJob
     # Bad time parsing — skip
   end
 
-  def record_line_health(buckets, recorded_at)
+  def record_line_health(city_key, buckets, recorded_at)
     records = buckets.map do |line, data|
       delays = data[:delays]
       avg = delays.any? ? (delays.sum.to_f / delays.size).round : 0
       max = delays.max || 0
 
-      # Use avg delay for status — a single outlier vehicle shouldn't flag a whole line
-      # Thresholds: 3+ min avg = minor, 5+ min avg = major, 5+ avg AND stalled = disrupted
       status = if data[:stalled] > 0 && avg >= 300
         "disrupted"
       elsif avg >= 300
@@ -135,6 +145,7 @@ class CollectTransitSnapshotJob < ApplicationJob
       end
 
       {
+        city: city_key,
         line: line,
         category: data[:category],
         category_color: data[:color] || "#94a3b8",

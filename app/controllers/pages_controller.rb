@@ -2,17 +2,18 @@ class PagesController < ApplicationController
   include OebbTransitSupport
 
   skip_before_action :authenticate_user!, only: [:home, :delays, :line_delays]
+  before_action :set_city, only: [:delays, :line_delays]
 
   def home
   end
 
   def delays
-    @latest_at = LineHealthSummary.latest_timestamp
+    @latest_at = LineHealthSummary.latest_timestamp_for(@city)
     return unless @latest_at
 
     range_start = 24.hours.ago
-    @current_health = LineHealthSummary.current.order(:category, :line)
-    all_summaries = LineHealthSummary.in_range(range_start, Time.current)
+    @current_health = LineHealthSummary.current_for(@city).order(:category, :line)
+    all_summaries = LineHealthSummary.for_city(@city).in_range(range_start, Time.current)
 
     # Network-wide on-time rate
     total_snapshots = all_summaries.count
@@ -38,9 +39,10 @@ class PagesController < ApplicationController
       { line: line, score: score, avg_delay: avg_delay, category: meta&.first, color: meta&.last }
     }.sort_by { |r| r[:score] }
 
-    # Top 5 bottleneck stations network-wide
+    # Top bottleneck stations for this city
     @top_bottlenecks = StopDelayRecord
       .joins(:transit_snapshot)
+      .where(stop_delay_records: { city: @city })
       .where(transit_snapshots: { fetched_at: range_start.. })
       .where("stop_delay_records.delay_seconds > 0")
       .group(:stop_name, :line)
@@ -61,12 +63,13 @@ class PagesController < ApplicationController
     @line = params[:line]
     range_start = 24.hours.ago
 
-    @line_info = LineHealthSummary.current.find_by(line: @line)
-    return redirect_to(delays_path, alert: "Line not found") unless @line_info
+    @line_info = LineHealthSummary.current_for(@city).find_by(line: @line)
+    return redirect_to(delays_path(city: @city), alert: "Line not found") unless @line_info
 
     # Reliability
-    total = LineHealthSummary.for_line(@line).in_range(range_start, Time.current).count
-    ok = LineHealthSummary.for_line(@line).in_range(range_start, Time.current).where(status: "ok").count
+    line_scope = LineHealthSummary.for_city(@city).for_line(@line).in_range(range_start, Time.current)
+    total = line_scope.count
+    ok = line_scope.where(status: "ok").count
     @reliability = total > 0 ? (ok.to_f / total * 100).round(1) : 100
     @grade = reliability_grade(@reliability)
 
@@ -79,26 +82,24 @@ class PagesController < ApplicationController
     @worst_station = @station_delays_1d.max_by { |_, avg, _, _, _| avg.to_f }
 
     # Delay trend
-    @delay_trend = LineHealthSummary.for_line(@line)
-      .in_range(range_start, Time.current)
+    @delay_trend = line_scope
       .group_by_period(:minute, :recorded_at, n: 5)
       .maximum(:max_delay_seconds)
       .transform_values { |v| ((v || 0) / 60.0).round(1) }
 
-    @avg_trend = LineHealthSummary.for_line(@line)
-      .in_range(range_start, Time.current)
+    @avg_trend = line_scope
       .group_by_period(:minute, :recorded_at, n: 5)
       .average(:avg_delay_seconds)
       .transform_values { |v| ((v || 0) / 60.0).round(1) }
 
     # Current vehicle count
-    latest_snapshot = TransitSnapshot.latest
+    latest_snapshot = TransitSnapshot.latest_for(@city)
     @vehicle_count = latest_snapshot ? VehiclePosition.where(transit_snapshot: latest_snapshot, line: @line).count : 0
 
     # Hour-of-day pattern
     @delay_by_hour = VehiclePosition
       .joins(:transit_snapshot)
-      .where(line: @line)
+      .where(city: @city, line: @line)
       .where(transit_snapshots: { fetched_at: range_start.. })
       .where("vehicle_positions.delay_seconds > 0")
       .group(Arel.sql("EXTRACT(HOUR FROM transit_snapshots.fetched_at)::int"))
@@ -110,13 +111,17 @@ class PagesController < ApplicationController
     @worst_hour = @delay_by_hour.max_by { |_, v| v }
 
     # Average delay
-    @avg_delay = LineHealthSummary.for_line(@line)
-      .in_range(range_start, Time.current)
-      .average(:avg_delay_seconds)
-    @avg_delay = ((@avg_delay || 0) / 60.0).round(1)
+    @avg_delay = ((line_scope.average(:avg_delay_seconds) || 0) / 60.0).round(1)
   end
 
   private
+
+  def set_city
+    @city = params[:city].presence || "wien"
+    @city = "wien" unless CityConfig.find(@city)
+    @city_config = CityConfig.find(@city)
+    @cities = CityConfig.all
+  end
 
   def reliability_grade(score)
     if score >= 95 then "A"
@@ -130,7 +135,7 @@ class PagesController < ApplicationController
   def station_delay_profile(line, since, stop_order)
     records = StopDelayRecord
       .joins(:transit_snapshot)
-      .where(line: line)
+      .where(city: @city, line: line)
       .where(transit_snapshots: { fetched_at: since.. })
 
     stop_stats = records
@@ -151,11 +156,11 @@ class PagesController < ApplicationController
   end
 
   def ordered_stops_for_line(line)
-    snapshot = TransitSnapshot.latest
+    snapshot = TransitSnapshot.latest_for(@city)
     return {} unless snapshot
 
     records = StopDelayRecord
-      .where(transit_snapshot: snapshot, line: line)
+      .where(transit_snapshot: snapshot, city: @city, line: line)
       .where.not(journey_id: [nil, ""])
       .order(:journey_id, :stop_sequence)
 
