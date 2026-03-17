@@ -3,9 +3,13 @@ module Api
     skip_before_action :authenticate_user!
 
     def index
-      disrupted = LineHealthSummary.current.where(status: %w[major_delay disrupted]).order(max_delay_seconds: :desc)
+      city = params[:city] || "wien"
+      disrupted = LineHealthSummary.current_for(city)
+        .where(status: %w[major_delay disrupted])
+        .order(max_delay_seconds: :desc)
 
       render json: {
+        city: city,
         disruptions: disrupted.map { |l|
           {
             line: l.line,

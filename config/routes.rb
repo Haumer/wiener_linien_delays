@@ -7,6 +7,7 @@ Rails.application.routes.draw do
   # get "fleet", to: "pages#fleet"
 
   namespace :api do
+    get :cities, to: "cities#index"
     get :vehicles, to: "vehicles#index"
     get :stops, to: "stops#index"
     get "stops/departures", to: "stops#departures", as: :stops_departures

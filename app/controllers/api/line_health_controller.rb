@@ -3,11 +3,13 @@ module Api
     skip_before_action :authenticate_user!
 
     def index
-      scope = LineHealthSummary.current
+      city = params[:city] || "wien"
+      scope = LineHealthSummary.current_for(city)
       scope = scope.where(category: params[:category]) if params[:category].present?
 
       lines = scope.order(:category, :line)
       summary = {
+        city: city,
         total_lines: lines.size,
         ok: lines.count { |l| l.status == "ok" },
         minor_delay: lines.count { |l| l.status == "minor_delay" },
@@ -16,6 +18,7 @@ module Api
       }
 
       render json: {
+        city: city,
         lines: lines.map { |l| line_json(l) },
         summary: summary,
         recorded_at: lines.first&.recorded_at&.iso8601
@@ -23,15 +26,17 @@ module Api
     end
 
     def history
+      city = params[:city] || "wien"
       line = params[:line]
       return render(json: { error: "line parameter required" }, status: :bad_request) unless line.present?
 
       from = params[:from].present? ? Time.parse(params[:from]) : 1.hour.ago
       to = params[:to].present? ? Time.parse(params[:to]) : Time.current
 
-      records = LineHealthSummary.for_line(line).in_range(from, to).order(:recorded_at)
+      records = LineHealthSummary.for_city(city).for_line(line).in_range(from, to).order(:recorded_at)
 
       render json: {
+        city: city,
         line: line,
         category: records.first&.category,
         data_points: records.map { |r|
